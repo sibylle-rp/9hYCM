@@ -4,4 +4,5 @@
 .Ruserdata
 
 # Ignore all files in data
-/data
+data/*
+!.gitkeep
