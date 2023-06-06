@@ -1,0 +1,225 @@
+---
+title: "Assignment"
+author: "Sibylle"
+date: "2023-06-06"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    df_print: paged
+    number_sections: true
+    code_folding: hide
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+library(tidyverse)
+library(raster)
+library(terra)
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+```
+
+# Wheat production volumes
+## Input data 
+In order to calculate wheat production volumes in 2005, we use the following two datasets:
+
+* SPAM2005V3r2_global_Y_TA_WHEA_A: a raster of the wheat yields in Kg/Ha
+
+* SPAM2005V3r2_global_H_TA_WHEA_A: a raster of the wheat harvested areas in Ha
+```{r wheat production input data, fig.height=5, fig.width=10,fig.show="hold", out.width="50%"}
+
+SPAM_data_folder_path <- "../data/SPAM_2005_v3.2/"
+
+#SPAM_A_data <- raster(glue::glue(SPAM_data_folder_path, "SPAM2005V3r2_global_A_TA_WHEA_A.tif"))
+SPAM_Y_data <- raster(glue::glue(SPAM_data_folder_path, "SPAM2005V3r2_global_Y_TA_WHEA_A.tif"))
+SPAM_H_data <- raster(glue::glue(SPAM_data_folder_path, "SPAM2005V3r2_global_H_TA_WHEA_A.tif"))
+
+# plot(SPAM_A_data, main="Global physical areas for \nwheat production in 2005 (in Ha)",
+#      axes=FALSE, box=FALSE, col=terrain.colors(4))
+plot(SPAM_Y_data,  main="Wheat yields in 2005 (in Kg/Ha)",
+     axes=FALSE, box=FALSE)
+plot(ne_coastline(), add=TRUE)
+plot(SPAM_H_data,  main="Global harvested areas for \nwheat production in 2005 (in Ha)",
+     axes=FALSE, box=FALSE)
+plot(ne_coastline(), add=TRUE)
+```
+
+## Results {#production}
+The resulting map is obtained by multiplying the two rasters, using the following definition of yield:
+$$
+Yield = Production / Area_{harvested}
+$$
+
+```{r wheat production calculations, fig.height=5, fig.width=10, message=TRUE}
+
+SPAM_P_data <- (SPAM_H_data*SPAM_Y_data)/1000000000
+
+plot(SPAM_P_data, 
+     main='2005 Wheat production volumes (in Mt)' ,
+     axes=FALSE, box=FALSE)
+plot(ne_coastline(), add=TRUE)
+
+writeRaster(SPAM_P_data,'../Assignment/SPAM2005V3r2_global_P_TA_WHEA_A.tif',
+            options=c('TFW=YES'), 
+            overwrite=TRUE)
+
+total_production_wheat <- signif(cellStats(SPAM_P_data, sum), 3)
+```
+
+> In 2005, `r total_production_wheat` Mt of wheat have been harvested globally.
+
+# Wheat production per country {#production_per_country}
+In order to get the wheat production per country, we layer the wheat production data raster and a vector of country boundaries (g2015_2005_2.shp). We can then extract the data within the country boundaries with the extract function.
+```{r production per country}
+GAUL_data_folder_path <- "../data/GAUL/"
+GAUL_boundaries <- vect(glue::glue(GAUL_data_folder_path, "g2015_2005_2.shp"))
+
+GAUL_data <- as.data.frame(GAUL_boundaries)
+GAUL_data$extract_GAUL <- terra::extract(rast(SPAM_P_data), GAUL_boundaries, 'sum', na.rm=TRUE, ID=FALSE)
+
+production_per_country <- GAUL_data %>%
+  group_by(ADM0_CODE, ADM0_NAME) %>%
+  summarise(Production_in_Mt = sum(extract_GAUL$layer, na.rm = TRUE)) %>%
+  ungroup()%>%
+  dplyr::select("Country" = "ADM0_NAME", "Production_in_Mt") %>% 
+  arrange(desc(Production_in_Mt))
+
+```
+
+**Table: Wheat production per country (in Mt)**
+```{r production per country table, echo=TRUE}
+
+production_per_country %>% mutate(Production_in_Mt = signif(Production_in_Mt, digits = 3))
+write.csv(production_per_country , 'production_per_country.csv')
+
+```
+
+# N output in harvested wheat yield
+It is assumed that 2% of harvested wheat yield consists of nitrogen (N) element. Using the wheat production raster from [Question 1](#production), the N yield can be calculated using the following formula: 
+$$
+N_{yield} = (Production / Area_{harvested})*0.02
+$$
+But we could have also directly used the provided wheat yield raster (SPAM2005V3r2_global_Y_TA_WHEA_A).
+
+```{r N output in harvested wheat, echo=TRUE, fig.height=5, fig.width=10}
+
+N_output_yield <- (SPAM_P_data/SPAM_H_data * 0.02) * 1000000000
+
+plot(N_output_yield, main='2005 N output in harvested wheat yield (in kg N/ha)',
+     axes=FALSE, box=FALSE)
+plot(ne_coastline(), add=TRUE)
+
+writeRaster(N_output_yield,'../Assignment/N_output_in_harvested_wheat_yield.tif',options=c('TFW=YES'), overwrite=TRUE)
+
+```
+
+# N inputs and losses of the 10 largest wheat producers
+
+## Input data
+In order to calculate the N inputs and losses of the 10 largest wheat producers, the following input data are used:
+
+* Wheat production per country ([Question 2](#production_per_country))
+
+* Nitrogen Use Efficiency (NUE)
+
+The following graph displays the Nitrogen Use Efficiency for the top 10 wheat producing countries.
+
+```{r NuE graph, echo=TRUE}
+country_NUE_assumptions <- read.csv("../data/NUE_Zhang_et_al_2015/Country_NUE_assumption.csv")
+
+Nitrogen_data_per_country <- production_per_country %>%
+  arrange(desc(Production_in_Mt)) %>%
+  head(10)  %>%
+    mutate(Country= case_when(
+      Country=="United States of America" ~ "USA",
+      Country == "Russian Federation" ~ "RussianFed",
+      TRUE ~ Country
+    )) %>%
+  left_join(country_NUE_assumptions, by = "Country") 
+
+ggplot(Nitrogen_data_per_country %>% dplyr::select(Country, NUE, Production_in_Mt))+
+  geom_col( aes(y=NUE,
+               x=reorder(Country, Production_in_Mt),
+               fill="Nitrogen Use Efficiency (%)"))+
+  coord_flip()+ scale_fill_manual(values = "darkred") +
+  geom_point(mapping=aes(y=Production_in_Mt/100,
+                         x=Country, shape="Wheat production (in Mt)")) +
+  scale_y_continuous(
+    name = "Nitrogen Use Efficiency (%)",
+    sec.axis = sec_axis(~.*100, name="Wheat Production (in Mt)")
+  )+
+  labs(y="Nitrogen Use Efficiency (%)",
+       x="Top 10 wheat producers",
+       title = "Nitrogen Use Efficiency and wheat production \nof the 10 largest wheat producers",
+       shape=NULL, fill=NULL)+
+  theme_bw()+
+  guides(fill = guide_legend(order = 1),
+         shape = guide_legend(order = 2))
+
+```
+
+## Results
+Following the assumption from previous question, we can calculate the N outputs in harvested wheat (in kg N). Then with the Nitrogen Use Efficiency (NUE) data, the N inputs are computed. Lastly, N losses are calculated as the difference between N inputs and N outputs.
+
+$$
+N_{output} = Production * 0.02
+$$
+$$
+N_{inputs} = N_{output} / NUE
+$$
+$$
+N_{losses} = N_{inputs} - N_{output} 
+$$
+
+The following graph shows the N inputs and losses of the 10 largest wheat producers.
+```{r N inputs and losses, echo=TRUE}
+
+Nitrogen_data_per_country <- Nitrogen_data_per_country %>%
+  mutate(N_outputs_in_Tg = 0.02*Production_in_Mt,
+         N_inputs_in_Tg = N_outputs_in_Tg/NUE,
+         N_losses_in_Tg = N_inputs_in_Tg - N_outputs_in_Tg)
+
+write.csv(Nitrogen_data_per_country , 'Nitrogen_data_per_country.csv')
+
+ggplot(Nitrogen_data_per_country %>% pivot_longer(cols=c(4:6),names_to = "Type", values_to = "Values") %>%
+         filter(Type != "N_inputs_in_Tg"))+
+  geom_col(position="dodge", aes(y=Values, x=reorder(Country, Production_in_Mt), fill=Type))+
+  coord_flip()+
+  scale_fill_discrete(name="N outputs and losses (Tg)", labels = c("N outputs (Tg)", "N losses (Tg)"))+
+  geom_point( mapping=aes(y=Production_in_Mt/10, x=Country, shape="Wheat production (in Mt)")) +
+  scale_y_continuous(
+    name = "N outputs and losses (in Tg)",
+    sec.axis = sec_axis(~.*10, name="Wheat Production (in Mt)")
+  )+
+  labs(y="N outputs and losses (in Tg)",
+       x="Top 10 wheat producers",
+       title = "N outputs and losses for wheat \nproduction for the top 10 producers",
+       shape=NULL, fill=NULL)+
+  theme_bw()+
+  guides(fill = guide_legend(order = 1),
+         shape = guide_legend(order = 2))
+
+ggsave(filename = "Wheat_N_outputs_and_losses.pdf")
+
+```
+
+The two largest wheat producers, China and India, as well as Pakistan have a very poor Nitrogen Use Efficiency leading to high Nitrogen losses. On the other hand, France and Russia, which are respectively 4th and 5th largest wheat producers have a better Nitrogen Use Efficiency, leading to smaller Nitrogen losses. Implementing policies to improve the Nitrogen Use Efficiency in China and India could therefore have a significant impact on global Nitrogen losses and related environmental impacts.
+
+# Integration into BNR's modelling suite
+One could for example use this analysis to assess the impact of different agricultural management practices on Nitrogen outputs and losses. However, specific Nitrogen information for each agricultural practice would be needed. The underlying assumptions, such as the 2% Nitrogen in harvested wheat yield would need to be refined. Furthermore, yield and harvesting area data for multiple years would have to be obtained (to avoid drawing conclusions based on a year that might be affected by extreme weather conditions). From my understanding this type of analysis could be performed and refined by the EPIC Model. 
+
+The Nitrogen cycle could also be integrated into the GLOBIOM model, which, by combining it to supply and demand data, could allow to see the impact of different nitrogen mitigation options on food security, as it has been done in [Chang, J. et al 2021](https://www.nature.com/articles/s43016-021-00366-x).
+
+# Issues & Assumptions
+Regarding the units of the SPAM raster data, I used the same units as the units described in the technical documents (Table 2-1). 
+Regarding the Production data calculations, I assumed that the yield data refers to the tonnes produced per harvested area, and not per physical area, also based on the SPAM technical documents.
+Comparing the results with FAOSTAT data confirmed both of these assumptions.
+
+For the calculation of the production per country, I manually added correspondences(in the script) between "USA" and "United States of America", and "Russian Federation" and "Russian Fed" in order to match the NUE to the top 10 producing countries. If the analysis would be performed on a larger data set, a proper concordance table should be implemented. 
+
+Additionally, when comparing the total production before and after the allocation per country, a difference of 0.7% is observed. This is probably due to the way the extraction is performed in the extract function. Due to time constraint and runtime limitation, this has not been further investigated. However, for some countries this could potentially lead to increased errors.
+
