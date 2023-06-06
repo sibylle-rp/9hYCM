@@ -3,7 +3,7 @@ The script for the assignment is available in Assignment/Assignment.Rmd
 I used a Rmarkdown file in order to have all the answers and code all in one place.  
 
 ## Installation
-Clone the repository using the following link: 
+Download the repository using the following link: https://github.com/octo-org/octo-repo/releases/latest
 
 The script runs with **R version 4.2.2**  
 
