@@ -3,9 +3,9 @@ The script for the assignment is available in Assignment/Assignment.Rmd
 I used a Rmarkdown file in order to have all the answers and code all in one place.  
 
 ## Installation
-Download the repository using the following link: https://github.com/octo-org/octo-repo/releases/latest
+Download the repository using the following link: [https://github.com/sibylle-rp/9hYCM/releases/tag/v1.0](https://github.com/sibylle-rp/9hYCM/releases/tag/v1.0)
 
-The script runs with **R version 4.2.2**  
+The script runs on **Rstudio Version 2023.03.0** with **R version 4.2.2**  
 
 Please install additionally the following packages: **tidyverse, raster, terra, rnaturalearth, rnaturalearthdata, knitr**  
 To do so, you can use the Rstudio IDE or the following function:  
